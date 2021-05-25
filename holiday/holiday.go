@@ -19,71 +19,54 @@ type Holiday struct {
 	DayUnit string    `json:"day_unit"`   // 放假天数单位（默认：天）
 }
 
-var year string
-var years []string
+const api = "https://tool.lu/holiday/index.html"
 
 var c *colly.Collector
+
+var layout string = "2006年01月02日"
+var beginY time.Time
+var endY time.Time
 
 func init() {
 	c = colly.NewCollector()
 
-	c.OnRequest(onRequest)
-	c.OnResponse(onResponse)
-	c.OnError(onError)
+	beginY = time.Date(2013, time.January, 1, 0, 0, 0, 0, time.Local)
+	endY = time.Date(time.Now().Year()-1, time.January, 1, 0, 0, 0, 0, time.Local)
 }
 
-type H struct {
-	year        string
-	reqCallback colly.RequestCallback
-	rspCallback colly.ResponseCallback
-}
-
-func onRequest(r *colly.Request) {
-	fmt.Println("Visiting", r.URL)
-}
-
-func onResponse(r *colly.Response) {
-}
-
-func onError(r *colly.Response, err error) {
-
-}
-
-func Query(y string) ([]Holiday, error) {
-	year = y
-	api := "https://tool.lu/holiday/index.html?y=" + year
-	YearHolidList := []Holiday{}
+func Query(year int) (YearHolidList []Holiday, err error) {
+	// 参数检查
+	y := time.Date(year, time.January, 1, 0, 0, 0, 0, time.Local)
+	if y.Before(beginY) || y.After(endY) {
+		err = fmt.Errorf("the year param must in[%d~%d]", beginY.Year(), endY.Year())
+		return
+	}
 
 	c.OnHTML("div.inner > table.tbl", func(e *colly.HTMLElement) {
 		e.DOM.Find("tr").Each(func(i int, e *goquery.Selection) {
 			if i != 0 {
-
 				wd := []rune(e.Find("td").Eq(3).Text())
-				wdi, _ := strconv.Atoi(string(wd[:len(wd)-1]))
+				wdi, err := strconv.Atoi(string(wd[:len(wd)-1]))
+				if err == nil {
+					se := strings.Split(e.Find("td").Eq(1).Text(), "~")
+					sdate, _ := time.Parse(layout, strconv.Itoa(year)+"年"+se[0])
+					edate, _ := time.Parse(layout, strconv.Itoa(year)+"年"+se[1])
 
-				se := strings.Split(e.Find("td").Eq(1).Text(), "~")
+					YearHolidList = append(YearHolidList, Holiday{
+						Name:    e.Find("td").Eq(0).Text(),
+						Sdate:   sdate,
+						Edate:   edate,
+						WorkDay: e.Find("td").Eq(2).Text(),
+						DayNum:  wdi,
+						DayUnit: string(wd[len(wd)-1:]),
+					})
+				}
 
-				timeLayout := "2006年01月02日"
-				loc, _ := time.LoadLocation("Local")
-				sdate, _ := time.ParseInLocation(timeLayout, year+"年"+se[0], loc)
-				edate, _ := time.ParseInLocation(timeLayout, year+"年"+se[1], loc)
-
-				YearHolidList = append(YearHolidList, Holiday{
-					Name:    e.Find("td").Eq(0).Text(),
-					Sdate:   sdate,
-					Edate:   edate,
-					WorkDay: e.Find("td").Eq(2).Text(),
-					DayNum:  wdi,
-					DayUnit: string(wd[len(wd)-1:]),
-				})
 			}
 
 		})
-
-		fmt.Println(len(YearHolidList))
 	})
 
-	err := c.Visit(api)
-
-	return YearHolidList, err
+	err = c.Visit(fmt.Sprintf("%s?y=%d", api, year))
+	return
 }
